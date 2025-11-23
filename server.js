@@ -23,9 +23,13 @@ const allowedOrigins = [
 ].filter(Boolean);
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: '*', // Allow all origins for debugging
   credentials: true
 }));
+
+app.get('/', (req, res) => {
+  res.send('BoredGames Backend is Running!');
+});
 
 app.use(express.json());
 
@@ -100,7 +104,7 @@ app.get('/api/me', (req, res) => {
 // Socket.io server
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: '*',
     methods: ['GET', 'POST'],
     credentials: true
   }
