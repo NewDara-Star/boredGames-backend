@@ -721,5 +721,5 @@ const PORT = process.env.PORT || 3001;
 
 httpServer.listen(PORT, () => {
   console.log(`🎮 boredGames server running on port ${PORT}`);
-  console.log(`📡 WebSocket server ready`);
+  console.log(`📡 WebSocket server ready - Redeploy Triggered`);
 });
