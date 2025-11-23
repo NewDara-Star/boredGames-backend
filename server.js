@@ -416,54 +416,92 @@ io.on('connection', (socket) => {
   });
 
   // Handle private room creation (legacy for TTT)
+  // Handle private room creation
   socket.on('create-room', ({ gameType }) => {
-    const roomId = `${gameType}-private-${Date.now()}`;
+    // Generate a shorter, friendlier room code
+    const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const roomId = `${gameType}-private-${roomCode}`;
+
     socket.join(roomId);
 
-    socket.emit('room-created', { roomId });
-    console.log(`Private room created: ${roomId}`);
+    // Store lobby metadata so we know what game to create later
+    activeGames.set(roomId, {
+      type: 'lobby',
+      gameType: gameType,
+      host: socket.id,
+      players: [socket.id]
+    });
+
+    socket.emit('room-created', { roomId: roomCode }); // Send the short code to the client
+    console.log(`Private room created: ${roomId} (Code: ${roomCode})`);
   });
 
   // Handle joining private room
   socket.on('join-room', ({ roomId }) => {
-    const room = io.sockets.adapter.rooms.get(roomId);
+    // The client sends the short code, we need to find the full room ID
+    // This is a bit inefficient (searching all active games), but fine for this scale.
+    // A better way would be a separate map for code -> roomId, but let's iterate for now.
+    let fullRoomId = null;
+    let lobby = null;
 
-    if (!room) {
+    for (const [key, value] of activeGames.entries()) {
+      if (key.endsWith(`-private-${roomId.toUpperCase()}`) && value.type === 'lobby') {
+        fullRoomId = key;
+        lobby = value;
+        break;
+      }
+    }
+
+    if (!fullRoomId || !lobby) {
       socket.emit('error', { message: 'Room not found' });
       return;
     }
 
-    if (room.size >= 2) {
+    if (lobby.players.length >= 2) {
       socket.emit('error', { message: 'Room is full' });
       return;
     }
 
-    socket.join(roomId);
+    socket.join(fullRoomId);
+    lobby.players.push(socket.id);
 
-    // Get the other player
-    const players = Array.from(room);
-    const otherPlayerId = players.find(id => id !== socket.id);
+    const otherPlayerId = lobby.host;
 
-    // Create game instance
-    const game = new TicTacToeGame(roomId, otherPlayerId, socket.id);
-    activeGames.set(roomId, game);
+    // Create the specific game instance
+    let game;
+    if (lobby.gameType === 'tic-tac-toe') {
+      game = new TicTacToeGame(fullRoomId, otherPlayerId, socket.id);
 
-    // Notify both players
-    io.to(otherPlayerId).emit('opponent-joined', {
-      roomId,
-      opponent: socket.id,
-      playerSymbol: 'X',
-      yourTurn: true
-    });
+      // Notify TTT players
+      io.to(otherPlayerId).emit('opponent-joined', {
+        roomId: fullRoomId,
+        opponent: socket.id,
+        playerSymbol: 'X',
+        yourTurn: true
+      });
 
-    socket.emit('opponent-joined', {
-      roomId,
-      opponent: otherPlayerId,
-      playerSymbol: 'O',
-      yourTurn: false
-    });
+      socket.emit('opponent-joined', {
+        roomId: fullRoomId,
+        opponent: otherPlayerId,
+        playerSymbol: 'O',
+        yourTurn: false
+      });
 
-    console.log(`Player joined room: ${roomId}`);
+    } else if (lobby.gameType === 'rock-paper-scissors') {
+      game = new RockPaperScissorsGame(fullRoomId, otherPlayerId, socket.id);
+
+      // Notify RPS players
+      io.to(fullRoomId).emit('opponent-joined', {
+        roomId: fullRoomId,
+        opponent: socket.id, // This might need adjustment depending on what frontend expects
+        gameType: 'rock-paper-scissors'
+      });
+    }
+
+    if (game) {
+      activeGames.set(fullRoomId, game); // Replace lobby with actual game
+      console.log(`Game started in room: ${fullRoomId} (${lobby.gameType})`);
+    }
   });
 
   // Handle game moves
